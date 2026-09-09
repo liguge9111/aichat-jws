@@ -1,0 +1,36 @@
+# Gradle / 构建产物
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# 模块级构建产物
+app/build/
+app/release/
+app/debug/
+
+# 签名与密钥（切勿提交）
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.pem
+signing.properties
+keystore.properties
+
+# Google 服务配置（若后续接入）
+google-services.json
+
+# 本地 SDK / NDK 路径
+sdk.dir
+ndk.dir
+
+# 日志
+*.log
