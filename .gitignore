@@ -1,6 +1,7 @@
 # Gradle / 构建产物
 *.iml
 .gradle/
+.kotlin/
 /local.properties
 /.idea/
 .DS_Store
@@ -9,6 +10,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# 构建日志（本地产物，不入库）
+build*.log
+
+# Gradle Wrapper 必须入库
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+!gradlew
+!gradlew.bat
 
 # 模块级构建产物
 app/build/

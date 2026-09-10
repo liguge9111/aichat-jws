@@ -1,0 +1,24 @@
+# 统一换行符，避免 Windows 贡献者提交 CRLF 造成全文件 diff
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不做换行转换
+*.jar binary
+*.png binary
+*.jpg binary
+*.webp binary
+*.apk binary
+*.aab binary
+*.zip binary
+*.jks binary
+*.keystore binary
+
+# Gradle Wrapper 的 jar 由 Gradle 官方生成，折叠进语言统计
+gradle/wrapper/gradle-wrapper.jar binary linguist-generated=true
+
+# 文档与配置参与语言统计
+*.md text
+*.kts text

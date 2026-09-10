@@ -1,6 +1,9 @@
 # CharChat
 
-一个 **BYOK（自带 Key）** 的 Android 角色聊天 App：导入 SillyTavern / TavernAI 角色卡，自动生成攻略属性，与角色模拟真实聊天——完全第一人称、像发微信一样，角色还会在合适的时机给你"发照片"。
+[![Android CI](https://github.com/liguge9111/aichat-jws/actions/workflows/android.yml/badge.svg)](https://github.com/liguge9111/aichat-jws/actions/workflows/android.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+一个 **BYOK（自带 Key）** 的 Android 角色聊天 App：导入 SillyTavern / TavernAI 角色卡，自动生成攻略属性，与角色模拟真实聊天——完全第一人称、像发微信一样，角色还会在合适的时机给你"发照片"、发语音。
 
 **本 App 不含任何后端、不收集任何数据、没有账号系统。** 所有 API 调用由你的设备直连你自己配置的端点。
 
@@ -22,7 +25,7 @@
 | 角色一致性 | 首次出图前把整张卡提炼成**固定中文形象档案**（≤200 字：发色/瞳色/体型/常服/画风），此后每张图都用"档案 + 近期剧情 + 画面"拼提示词，大幅缓解跨图"变脸/换装"漂移 |
 | 共同回忆 | 回复里的 `[[MEM:...]]` 信号把角色该记住的事落库，之后每轮作为【共同回忆】注入；属性面板可查看/编辑 |
 | 好感度系统 | 好感度与关系阶段随对话自然演进（隐藏信号 `[[AFF:+n]]` / `[[REL:阶段]]`），玩家不能直接改（防作弊护栏） |
-| 语音 | 系统语音识别（麦克风按钮转文字）+ TTS 朗读角色消息；可选自动朗读 |
+| 语音消息 | 长按「按住 说话」录音发送（上滑取消）；录音经语音识别转写后发给角色，**角色回复会带一条语音**，点气泡播放。TTS / ASR 均走你自己配置的 OpenAI 兼容端点，可按角色单独设音色 |
 | 群聊 | 多角色同场；`@名字` 定向，无 @ 或 `@全体成员` 则全员依次回复；各自独立发图、各自推进好感 |
 | 备份 | 导出/导入 JSON（头像以 base64 内嵌，备份自包含） |
 | 数据安全 | API Key 存 Android Keystore 加密区；已关闭整机备份与云备份 |
@@ -47,12 +50,15 @@
 
 ## 快速开始
 
-1. 用 **Android Studio（Koala 或更新）** 打开 `CharChatApp/`。
-2. 首次打开需生成 Gradle Wrapper 并指向本地 Android SDK（`local.properties` 已列入 `.gitignore`，不会被提交）。
-3. 编译运行到模拟器或真机（**minSdk 26 / Android 8.0+**）。
+1. 克隆仓库：`git clone https://github.com/liguge9111/aichat-jws.git`
+2. 用 **Android Studio（Koala 或更新）** 打开项目根目录，等待 Gradle 同步（Wrapper 已随仓库提交，无需手动生成）。
+3. 编译运行到模拟器或真机（**minSdk 26 / Android 8.0+**）：
+   ```bash
+   ./gradlew installDebug      # 或直接在 Android Studio 里点 Run
+   ```
 4. 进 App → 18+ 确认 → 右下 `+` 导入一张角色卡 → 去 **设置** 填你的 API 配置 → 开始聊。
 
-> 本仓库未提交 Gradle Wrapper。构建方式见下方 [构建说明](#构建)。
+> `local.properties`（本机 SDK 路径）由 Android Studio 自动生成，已列入 `.gitignore`，不会被提交。
 
 ### API 配置（设置页）
 
@@ -64,8 +70,11 @@
 | 对话模型 | `gpt-4o-mini` |
 | 出图 Base URL | `https://dashscope.aliyuncs.com/compatible-mode/v1`（百炼）或 OpenAI 兼容出图网关 |
 | 出图模型 | `qwen-image` / `wanx2.1-t2i-turbo` / 你的兼容出图模型 |
+| 语音 TTS | OpenAI 兼容 `POST /v1/audio/speech`（如 `tts-1` / 网关提供的语音合成模型）+ 全局音色 |
+| 语音 ASR | OpenAI 兼容 `POST /v1/audio/transcriptions`（如 `whisper-1`），把录音转成文字 |
 
-- 图像配置留空会自动复用对话的 Key 与 Base URL。
+- 图像配置留空会自动复用对话的 Key 与 Base URL；语音配置同样逐级回落：**ASR → TTS → 对话**，只填一处也能用。
+- 语音消息依赖 TTS 与 ASR 两段配置；未配置时按住说话会给出提示并放弃该条语音，不会误发。
 - 填完点 **测试连接** 会先探测 `GET /models`（不消耗额度），端点不支持时降级为一次极短对话确认连通。
 - 图像段另有 **测试图像接口**（探测并列出出图模型，点击 chip 可一键填入）与 **发一张测试图**（真实出图，消耗额度）。
 
@@ -113,7 +122,13 @@ Kotlin · Jetpack Compose · Hilt · Room · OkHttp(SSE) · kotlinx.serializatio
 
 ```
 app/src/main/java/com/lirui/charchat/
-├─ data/         远程客户端、Room、卡解析、备份、加密存储、语音
+├─ data/         远程客户端（对话 / 图像 / 语音）、Room、卡解析、备份、加密存储
+│  ├─ remote/    OpenAIChatClient / OpenAIImageClient / DashScopeImageClient / OpenAISpeechClient
+│  ├─ db/        Room entity / dao / AppDatabase（含版本迁移）
+│  ├─ cardparser/ SillyTavern 角色卡解析与映射
+│  ├─ settings/  加密 DataStore 设置读写
+│  ├─ storage/   头像 / 照片 / 语音文件的本地存储
+│  └─ backup/    备份导出与导入
 ├─ domain/
 │  ├─ chat/      PromptBuilder / InputGuardrail / RoundController / PhotoIntent
 │  │             ReplyLanguage / VisualAnchor / PhotoPromptComposer / GreetingOptions …
@@ -123,19 +138,22 @@ app/src/main/java/com/lirui/charchat/
 └─ ui/           gate / home / import / chat / group / attr / profile / worldbook / settings
 ```
 
-纯函数集中在 `domain/chat/`，均配有单元测试（`app/src/test/`）。
+纯函数集中在 `domain/chat/`，均配有单元测试（`app/src/test/`，共 **148 例**）。
 
 ## 构建
 
+```bash
+# 环境：JDK 17 + Android SDK 34（Gradle Wrapper 已提交，首次运行自动下载 Gradle 8.9）
+./gradlew testDebugUnitTest     # 单元测试（148 例）
+./gradlew assembleDebug         # 产出 app/build/outputs/apk/debug/app-debug.apk
+./gradlew installDebug          # 安装到已连接设备
 ```
-# 需要 JDK 17（Kotlin 1.9 / AGP 8.x）
-# 1) 首次生成 wrapper
-gradle wrapper --gradle-version 8.9
-# 2) 打包
-./gradlew :app:assembleDebug
-# 3) 跑单测
-./gradlew :app:testDebugUnitTest     # 137 例，全绿
-```
+
+CI（GitHub Actions）在每次 push / PR 时执行单测与打包，配置见 [`.github/workflows/android.yml`](.github/workflows/android.yml)。
+
+## 参与贡献
+
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 更新历史
 
@@ -143,4 +161,6 @@ gradle wrapper --gradle-version 8.9
 
 ## 协议
 
-尚未指定 License。开源前请选定一份（如 MIT）并补 `LICENSE` 文件，同时核对 `app/build.gradle.kts` 中的 `applicationId` 与签名配置符合你的预期。
+本项目采用 [MIT License](LICENSE) 开源，可自由使用、修改与商用（含闭源二次开发），请保留版权声明。
+
+> 使用前请确认：`app/build.gradle.kts` 中的 `applicationId`、签名配置与版本号符合你自己的发布预期。

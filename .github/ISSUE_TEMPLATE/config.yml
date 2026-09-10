@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用与配置问题
+    url: https://github.com/liguge9111/aichat-jws/blob/main/README.md
+    about: 先看 README 的「快速开始 / 常见问题」，多数配置问题已有说明
+  - name: 安全问题（请勿公开提交）
+    url: https://github.com/liguge9111/aichat-jws/security/advisories/new
+    about: API Key 泄露、本地数据外泄等风险请走私密渠道反馈
