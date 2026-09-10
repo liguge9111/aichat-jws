@@ -1,18 +1,31 @@
 package com.lirui.charchat.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -26,6 +39,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -33,23 +47,33 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.lirui.charchat.data.settings.ApiConfig
 
+/**
+ * BYOK 设置页：对话 / 图像 / 语音三组配置各自折叠，默认收起，点击标题展开编辑。
+ * 三组均支持任意 OpenAI 兼容网关；语音侧留空时逐级复用（ASR 复用 TTS，TTS 复用对话）。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    onBack: () -> Unit = {},
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
     val current by viewModel.config.collectAsState()
     val testState by viewModel.testState.collectAsState()
 
-    // 本地编辑态（保存时回写 repository）
-    var chatBaseUrl by remember { mutableStateOf(current.chatBaseUrl) }
-    var chatApiKey by remember { mutableStateOf(current.chatApiKey) }
-    var chatModel by remember { mutableStateOf(current.chatModel) }
-    var imageBaseUrl by remember { mutableStateOf(current.imageBaseUrl) }
-    var imageApiKey by remember { mutableStateOf(current.imageApiKey) }
-    var imageModel by remember { mutableStateOf(current.imageModel) }
-    var nsfw by remember { mutableStateOf(current.nsfwFilterEnabled) }
+    // 本地编辑态：整份配置一起改，避免多字段各自 remember 时保存漏项
+    var cfg by remember { mutableStateOf(current) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("API 设置 (BYOK)") }) }
+        topBar = {
+            TopAppBar(
+                title = { Text("API 设置 (BYOK)") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                }
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -59,99 +83,122 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("对话模型", style = MaterialTheme.typography.titleSmall)
-            Field("Base URL", chatBaseUrl) { chatBaseUrl = it }
-            Field("API Key", chatApiKey, isSecret = true) { chatApiKey = it }
-            Field("Model", chatModel) { chatModel = it }
-
-            Text("图像模型", style = MaterialTheme.typography.titleSmall)
-            Field("Base URL", imageBaseUrl) { imageBaseUrl = it }
-            Field("API Key", imageApiKey, isSecret = true) { imageApiKey = it }
-            Field("Model", imageModel) { imageModel = it }
-
-            Text(
-                "留空则复用对话侧配置。注意：多数对话网关（如小米 MiMo）并不提供出图接口，需要单独填一个支持 /images/generations 的地址。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            // 图像侧独立探测：先保存再探测，确保使用最新配置
-            val imageState by viewModel.imageState.collectAsState()
-            val imageModels by viewModel.imageModels.collectAsState()
-            androidx.compose.foundation.layout.Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    modifier = Modifier.weight(1f),
-                    enabled = imageState !is TestState.Testing,
-                    onClick = {
-                        saveAll(viewModel, chatBaseUrl, chatApiKey, chatModel, imageBaseUrl, imageApiKey, imageModel, nsfw)
-                        viewModel.testImageConnection()
-                    }
-                ) {
-                    Text(if (imageState is TestState.Testing) "检测中…" else "测试图像接口")
-                }
-                TextButton(
-                    modifier = Modifier.weight(1f),
-                    enabled = imageState !is TestState.Testing,
-                    onClick = {
-                        saveAll(viewModel, chatBaseUrl, chatApiKey, chatModel, imageBaseUrl, imageApiKey, imageModel, nsfw)
-                        viewModel.testImageGeneration()
-                    }
-                ) {
-                    Text("发一张测试图")
-                }
+            Section("对话模型", "Base URL / API Key / Model，默认折叠",
+                summary = cfg.chatModel.ifBlank { "未设置模型" }) {
+                Field("Base URL", cfg.chatBaseUrl) { cfg = cfg.copy(chatBaseUrl = it) }
+                Field("API Key", cfg.chatApiKey, isSecret = true) { cfg = cfg.copy(chatApiKey = it) }
+                Field("Model", cfg.chatModel) { cfg = cfg.copy(chatModel = it) }
             }
 
-            when (val s = imageState) {
-                is TestState.Idle -> Unit
-                is TestState.Testing -> Text(
-                    "正在检测图像接口…",
+            Section("图像模型", "出图网关配置，留空复用对话侧",
+                summary = cfg.imageModel.ifBlank { "复用对话侧" }) {
+                Field("Base URL", cfg.imageBaseUrl) { cfg = cfg.copy(imageBaseUrl = it) }
+                Field("API Key", cfg.imageApiKey, isSecret = true) { cfg = cfg.copy(imageApiKey = it) }
+                Field("Model", cfg.imageModel) { cfg = cfg.copy(imageModel = it) }
+                Text(
+                    "留空则复用对话侧配置。注意：多数对话网关（如小米 MiMo）并不提供出图接口，需要单独填一个支持 /images/generations 的地址。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                is TestState.Ok -> Text(
-                    s.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                is TestState.Error -> Text(
-                    s.message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error
-                )
-            }
 
-            if (imageModels.isNotEmpty()) {
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                // 图像侧独立探测：先保存再探测，确保使用最新配置
+                val imageState by viewModel.imageState.collectAsState()
+                val imageModels by viewModel.imageModels.collectAsState()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    imageModels.take(12).forEach { m ->
-                        TextButton(onClick = { imageModel = m }) { Text(m, style = MaterialTheme.typography.bodySmall) }
+                    Button(
+                        modifier = Modifier.weight(1f),
+                        enabled = imageState !is TestState.Testing,
+                        onClick = {
+                            viewModel.save(cfg)
+                            viewModel.testImageConnection()
+                        }
+                    ) {
+                        Text(if (imageState is TestState.Testing) "检测中…" else "测试图像接口")
+                    }
+                    TextButton(
+                        modifier = Modifier.weight(1f),
+                        enabled = imageState !is TestState.Testing,
+                        onClick = {
+                            viewModel.save(cfg)
+                            viewModel.testImageGeneration()
+                        }
+                    ) {
+                        Text("发一张测试图")
+                    }
+                }
+
+                when (val s = imageState) {
+                    is TestState.Idle -> Unit
+                    is TestState.Testing -> Text(
+                        "正在检测图像接口…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    is TestState.Ok -> Text(
+                        s.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    is TestState.Error -> Text(
+                        s.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
+                if (imageModels.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        imageModels.take(12).forEach { m ->
+                            TextButton(onClick = { cfg = cfg.copy(imageModel = m) }) {
+                                Text(m, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
                     }
                 }
             }
 
-            androidx.compose.material3.HorizontalDivider()
+            Section("语音模型", "语音合成(TTS)与识别(ASR)，留空逐级复用",
+                summary = cfg.ttsModel.ifBlank { "复用对话侧" }) {
+                Text(
+                    "TTS 把角色的回复读成语音；ASR 把玩家发的语音转成文字再进对话模型。留空时 ASR 复用 TTS 配置、TTS 复用对话配置。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text("语音合成（TTS）", style = MaterialTheme.typography.labelLarge)
+                Field("TTS Base URL", cfg.ttsBaseUrl) { cfg = cfg.copy(ttsBaseUrl = it) }
+                Field("TTS API Key", cfg.ttsApiKey, isSecret = true) { cfg = cfg.copy(ttsApiKey = it) }
+                Field("TTS Model", cfg.ttsModel) { cfg = cfg.copy(ttsModel = it) }
+                Field("音色 / 口音（Voice ID）", cfg.ttsVoice) { cfg = cfg.copy(ttsVoice = it) }
 
-            androidx.compose.foundation.layout.Row(
+                Spacer(Modifier.height(4.dp))
+                Text("语音识别（ASR，可选）", style = MaterialTheme.typography.labelLarge)
+                Field("ASR Base URL", cfg.asrBaseUrl) { cfg = cfg.copy(asrBaseUrl = it) }
+                Field("ASR API Key", cfg.asrApiKey, isSecret = true) { cfg = cfg.copy(asrApiKey = it) }
+                Field("ASR Model", cfg.asrModel) { cfg = cfg.copy(asrModel = it) }
+            }
+
+            HorizontalDivider()
+
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text("内容过滤（个人把玩默认关）")
-                Switch(checked = nsfw, onCheckedChange = { nsfw = it })
+                Switch(checked = cfg.nsfwFilterEnabled, onCheckedChange = { cfg = cfg.copy(nsfwFilterEnabled = it) })
             }
 
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = {
-                    saveAll(viewModel, chatBaseUrl, chatApiKey, chatModel, imageBaseUrl, imageApiKey, imageModel, nsfw)
-                }
+                onClick = { viewModel.save(cfg) }
             ) {
                 Text("保存")
             }
@@ -161,7 +208,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 modifier = Modifier.fillMaxWidth(),
                 enabled = testState !is TestState.Testing,
                 onClick = {
-                    saveAll(viewModel, chatBaseUrl, chatApiKey, chatModel, imageBaseUrl, imageApiKey, imageModel, nsfw)
+                    viewModel.save(cfg)
                     viewModel.testConnection()
                 }
             ) {
@@ -204,27 +251,52 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
     }
 }
 
-/** 保存前统一走这里：三处按钮（保存/测试对话/测试图像）都要求"先落盘最新输入再动作"。 */
-private fun saveAll(
-    vm: SettingsViewModel,
-    chatBaseUrl: String,
-    chatApiKey: String,
-    chatModel: String,
-    imageBaseUrl: String,
-    imageApiKey: String,
-    imageModel: String,
-    nsfw: Boolean
-) = vm.save(
-    ApiConfig(
-        chatBaseUrl = chatBaseUrl,
-        chatApiKey = chatApiKey,
-        chatModel = chatModel,
-        imageBaseUrl = imageBaseUrl,
-        imageApiKey = imageApiKey,
-        imageModel = imageModel,
-        nsfwFilterEnabled = nsfw
-    )
-)
+/**
+ * 可折叠配置分区：默认收起，点击标题行展开。
+ * 收起时显示 summary（如当前模型名），方便不展开也能确认配置状态。
+ */
+@Composable
+private fun Section(
+    title: String,
+    subtitle: String,
+    summary: String,
+    content: @Composable () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors()
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        if (expanded) subtitle else "$subtitle · 当前：$summary",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "收起" else "展开"
+                )
+            }
+            if (expanded) {
+                Spacer(Modifier.height(8.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun Field(

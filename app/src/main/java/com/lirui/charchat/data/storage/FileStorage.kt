@@ -29,4 +29,14 @@ class FileStorage @Inject constructor(
         file.writeBytes(bytes)
         return file.absolutePath
     }
+
+    /** 语音消息音频（玩家录音 / 角色 TTS 合成）。ext 由实际格式决定（mp3/wav）。 */
+    fun saveAudio(bytes: ByteArray, ext: String = "mp3"): String {
+        val file = File(dir("audio"), "${UUID.randomUUID()}.$ext")
+        file.writeBytes(bytes)
+        return file.absolutePath
+    }
+
+    /** 录音直接落盘的目录（MediaRecorder 输出用）。 */
+    fun audioDir(): File = dir("audio")
 }

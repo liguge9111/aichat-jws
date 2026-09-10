@@ -66,7 +66,7 @@ fun AppNav(nav: NavHostController = rememberNavController()) {
             )
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen()
+            SettingsScreen(onBack = { nav.popBackStack() })
         }
         composable(
             route = "${Routes.CHAT}/{cardId}",

@@ -1,9 +1,21 @@
 package com.lirui.charchat.ui.chat
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.media.MediaPlayer
+import android.media.MediaRecorder
+import android.os.Build
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lirui.charchat.data.cardparser.CardMapper
+import com.lirui.charchat.data.storage.FileStorage
+import com.lirui.charchat.domain.repository.ChatRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
 import com.lirui.charchat.data.db.dao.CharacterCardDao
 import com.lirui.charchat.data.db.dao.PlayerProfileDao
 import com.lirui.charchat.data.db.entity.ChatMessageEntity
@@ -11,6 +23,7 @@ import com.lirui.charchat.data.db.entity.PlayerProfileEntity
 import com.lirui.charchat.domain.chat.ChatPhase
 import com.lirui.charchat.domain.chat.GreetingOptions
 import com.lirui.charchat.domain.chat.InputGuardrail
+import com.lirui.charchat.domain.chat.UserIdentity
 import com.lirui.charchat.domain.model.CharacterCard
 import com.lirui.charchat.domain.model.PlayerProfile
 import com.lirui.charchat.domain.repository.ChatOrchestrator
@@ -44,7 +57,13 @@ data class ChatUiState(
     /** 是否正在展示开场白选择弹框。 */
     val showGreetingDialog: Boolean = false,
     /** 非致命提示（如照片生成失败），下一次发送/输入时清除。 */
-    val notice: String? = null
+    val notice: String? = null,
+    /** 是否正在长按录音。 */
+    val isRecording: Boolean = false,
+    /** 语音识别中（松开后转文字）。 */
+    val voiceBusy: Boolean = false,
+    /** 当前正在播放的语音消息路径（null=没在播）。 */
+    val playingAudioPath: String? = null
 )
 
 @HiltViewModel
@@ -53,6 +72,9 @@ class ChatViewModel @Inject constructor(
     private val messages: MessageRepository,
     private val cards: CharacterCardDao,
     private val profiles: PlayerProfileDao,
+    private val storage: FileStorage,
+    private val chatRepo: ChatRepository,
+    @ApplicationContext private val appContext: Context,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -120,7 +142,12 @@ class ChatViewModel @Inject constructor(
         greetingHandled = true
         viewModelScope.launch {
             // 开场白清洗在候选组装（GreetingOptions）时已完成，这里直接落库。
-            messages.insertCharacter(cardId, text)
+            // 落库前把 {{user}}/{{char}} 占位符替换为玩家/角色名：既避免 UI 显示宏原文，
+            // 也让开场白进入模型上下文时"玩家是谁"不被宏吃掉。
+            val pName = _state.value.boundProfile?.name?.trim()?.ifBlank { "玩家" } ?: "玩家"
+            val cardName = _state.value.card?.name.orEmpty()
+            val finalText = UserIdentity.replace(text, pName, cardName)
+            messages.insertCharacter(cardId, finalText)
         }
     }
 
@@ -230,6 +257,162 @@ class ChatViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    // ---------- 语音：录音 → 转写 → 带语音发送 ----------
+
+    private var recorder: MediaRecorder? = null
+    private var recordFile: File? = null
+    private var recordStartedAt = 0L
+    private var player: MediaPlayer? = null
+
+    /** 麦克风权限是否已授予（UI 长按录音前先查）。 */
+    fun hasRecordPermission(): Boolean =
+        ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /** 按下开始录音（调用前须确认已授权）。输出 AAC/m4a 到应用私有 audio 目录。 */
+    fun startRecording() {
+        if (_state.value.isRecording || _state.value.voiceBusy) return
+        val file = File(storage.audioDir(), "rec_${System.currentTimeMillis()}.m4a")
+        val rec = try {
+            MediaRecorder().apply {
+                setAudioSource(MediaRecorder.AudioSource.MIC)
+                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioSamplingRate(44100)
+                setAudioEncodingBitRate(96000)
+                setOutputFile(file.absolutePath)
+                prepare()
+                start()
+            }
+        } catch (e: Throwable) {
+            file.delete()
+            _state.value = _state.value.copy(notice = "无法启动录音：${e.message ?: "未知错误"}")
+            return
+        }
+        recorder = rec
+        recordFile = file
+        recordStartedAt = SystemClock.elapsedRealtime()
+        _state.value = _state.value.copy(isRecording = true)
+    }
+
+    /** 松开结束录音。cancel=true 丢弃；否则转写为文字并按语音消息发送。 */
+    fun stopRecording(cancel: Boolean) {
+        val rec = recorder ?: return
+        val file = recordFile
+        val started = recordStartedAt
+        recorder = null
+        recordFile = null
+        recordStartedAt = 0L
+        var discarded = cancel
+        try {
+            if (!cancel) rec.stop() // 录音过短时 stop 可能抛异常 → 走丢弃
+        } catch (e: Throwable) {
+            discarded = true
+        } finally {
+            runCatching { rec.release() }
+        }
+        val duration = SystemClock.elapsedRealtime() - started
+        _state.value = _state.value.copy(isRecording = false)
+        if (discarded || file == null) {
+            file?.delete()
+            return
+        }
+        if (duration < 900) {
+            file.delete()
+            _state.value = _state.value.copy(notice = "说话时间太短，未发送")
+            return
+        }
+        sendVoice(file, duration)
+    }
+
+    /** 语音消息链路：云端 ASR 转文字 → 编排器带音频发送（角色会回语音）。 */
+    private fun sendVoice(file: File, durationMs: Long) {
+        viewModelScope.launch {
+            _state.value = _state.value.copy(voiceBusy = true, notice = null)
+            try {
+                val card = freshCard() ?: return@launch
+                val text = chatRepo.transcribeAudio(file).trim()
+                if (text.isBlank()) {
+                    file.delete()
+                    _state.value = _state.value.copy(
+                        notice = "没听清，未发送。可以再按住说一次，或检查设置里的语音识别配置"
+                    )
+                    return@launch
+                }
+                val history = messages.getHistory(cardId)
+                orchestrator.send(
+                    card = card,
+                    history = history,
+                    rawUserText = text,
+                    voiceAudio = file.absolutePath to durationMs
+                ).collect { phase -> applyPhase(phase) }
+            } catch (e: Throwable) {
+                file.delete()
+                _state.value = _state.value.copy(
+                    phase = ChatPhase.Done(false, e.message ?: "语音发送失败")
+                )
+            } finally {
+                _state.value = _state.value.copy(voiceBusy = false)
+            }
+        }
+    }
+
+    // ---------- 语音：播放 ----------
+
+    /** 点语音气泡播放/停止；正在播同一条则停止。 */
+    fun togglePlayAudio(path: String?) {
+        if (path.isNullOrBlank()) return
+        if (_state.value.playingAudioPath == path) {
+            stopPlayback()
+            return
+        }
+        stopPlayback()
+        player = try {
+            MediaPlayer().apply {
+                setDataSource(path)
+                setOnPreparedListener { it.start() }
+                setOnCompletionListener { stopPlayback() }
+                setOnErrorListener { _, _, _ -> stopPlayback(); true }
+                prepareAsync()
+            }
+        } catch (e: Throwable) {
+            _state.value = _state.value.copy(notice = "无法播放语音：${e.message ?: "未知错误"}")
+            null
+        } ?: return
+        _state.value = _state.value.copy(playingAudioPath = path)
+    }
+
+    fun stopPlayback() {
+        runCatching { player?.release() }
+        player = null
+        if (_state.value.playingAudioPath != null) {
+            _state.value = _state.value.copy(playingAudioPath = null)
+        }
+    }
+
+    // ---------- 每角色音色 ----------
+
+    /** 保存该角色专属音色；留空则回落设置页全局音色。 */
+    fun updateTtsVoice(voice: String) {
+        viewModelScope.launch {
+            runCatching { cards.updateTtsVoice(cardId, voice.trim()) }
+        }
+    }
+
+    override fun onCleared() {
+        stopPlayback()
+        val rec = recorder
+        val file = recordFile
+        if (rec != null) {
+            recorder = null
+            recordFile = null
+            runCatching { rec.stop() }
+            runCatching { rec.release() }
+        }
+        file?.delete()
+        super.onCleared()
     }
 
     /** 把编排器阶段写入 UI；Notice 单独留存，避免被紧随其后的 Done 冲掉。 */

@@ -75,6 +75,21 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /**
+     * 重新开始：清空聊天记录，并把这段关系产生的运行状态一并归零
+     *（好感/关系阶段、共同回忆、达成的约定），角色卡设定与状态栏保留。
+     * 下次进入聊天会因"无历史"自动重新弹出开场白候选，实现真正的从头开始。
+     */
+    fun restartChat(card: CharacterCardEntity) {
+        viewModelScope.launch {
+            messages.clear(card.id)
+            cards.updateAffinity(card.id, 0, "陌生人")
+            cards.updateMemories(card.id, "")
+            cards.updateAdditionalNotes(card.id, "")
+            _notice.value = HomeNotice("已重置「${card.name}」，下次进入将从开场白重新开始")
+        }
+    }
+
     // ---------- 备份 ----------
 
     /** 生成备份 JSON，UI 通过 pendingExport 取走后写文件。 */

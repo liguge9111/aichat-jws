@@ -66,5 +66,10 @@ data class CharacterCard(
      * 角色视觉档案（v8）：提炼后固定不变的中文外貌基线，每次出图拼入提示词保证跨图一致性。
      * 空串 = 尚未提炼（首次出图前自动提炼一次并落库）。
      */
-    val visualAnchor: String = ""
+    val visualAnchor: String = "",
+    /**
+     * 该角色专用的语音合成音色（v9，如 Cherry / Ethan / Serena）。
+     * 空串 = 回落设置页里的全局音色。
+     */
+    val ttsVoice: String = ""
 )

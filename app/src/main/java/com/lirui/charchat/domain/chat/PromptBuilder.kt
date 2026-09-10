@@ -21,29 +21,39 @@ object PromptBuilder {
     ): String {
         val a = card.attributes
         val p = card.player
+        val playerName = UserIdentity.displayName(p)
         val sb = StringBuilder()
+
+        // 卡原文里的 {{user}}/{{char}} 宏统一替换为玩家/角色名：多数模型不认识这些宏，
+        // 原样下发会把"玩家是谁"这条线索丢掉，角色就倾向把玩家当陌生人。
+        fun clean(s: String): String = UserIdentity.replace(s, playerName, card.name)
 
         sb.appendLine("你现在是${card.name}。请以第一人称真实地扮演 TA，与玩家像在微信里聊天一样对话。")
         sb.appendLine("下面的【角色设定】和【世界设定】是关于你和这个世界的唯一事实来源：你的外貌、穿着、性格、经历、说话方式、以及世界里的人事物，一切以此为准。任何回复都不得与之矛盾，也不要编造与之冲突的事实。")
         sb.appendLine()
 
         // 酒馆化设定：直接使用卡原文（description 优先，其次 personality），不再字段化拆解
-        val rawSetting = card.description.trim().ifBlank { card.personality.trim() }
+        val rawSetting = clean(card.description).trim().ifBlank { clean(card.personality).trim() }
         if (rawSetting.isNotEmpty()) {
             sb.appendLine("【角色设定（角色卡原文，含外貌/穿着/性格/背景等全部内容，请完整遵循）】")
             sb.appendLine(rawSetting)
             if (card.description.isNotBlank() && card.personality.isNotBlank()
-                && !card.description.contains(card.personality.trim())
+                && !clean(card.description).contains(clean(card.personality).trim())
             ) {
                 sb.appendLine()
-                sb.appendLine("【性格补充（同样必须遵循）】${card.personality.trim()}")
+                sb.appendLine("【性格补充（同样必须遵循）】${clean(card.personality).trim()}")
             }
             sb.appendLine()
         }
         if (card.scenario.isNotBlank()) {
-            sb.appendLine("【当前情境（故事发生的此时此地）】${card.scenario}")
+            sb.appendLine("【当前情境（故事发生的此时此地）】${clean(card.scenario)}")
             sb.appendLine()
         }
+        sb.appendLine("【玩家身份（务必认清正在和你说话的人是谁）】")
+        sb.appendLine("- 此刻与你对话的人，就是上面设定和情境中以「你」「玩家」身份出现的那个当事人，不是抽象的陌生人或外部用户。")
+        sb.appendLine("- 若角色设定、当前情境或开场白写明了 TA 的身份与你们的关系（如 TA 是你的主人/恋人/青梅竹马/搭档/客人/仇人/徒弟/邻居…），你必须始终按这个身份和关系对待 TA，把 TA 当作你真实人生里认识的人；称呼、语气、亲密程度都要与之匹配，绝不要表现得像第一次见到 TA。")
+        sb.appendLine("- 即使上面没有明说 TA 是谁，TA 也是此刻走进你故事、正在与你对话的人：按你的性格与当下场合自然接待 TA。除非角色设定或开场白本身就是「初次见面 / 在路上偶遇陌生人」的桥段，否则不要出现「你是谁」「我们认识吗」「你是哪位」这类把对方当外人的反应。")
+        sb.appendLine()
         if (activeWorld.isNotEmpty()) {
             sb.appendLine("【世界设定（此刻相关的背景，必须与之一致，不要出现与之矛盾的细节）】")
             activeWorld.forEach { w -> sb.appendLine("- $w") }
@@ -58,13 +68,14 @@ object PromptBuilder {
         sb.appendLine("【当前攻略状态】")
         sb.appendLine("好感度：${a.affection}/100")
         sb.appendLine("关系阶段：${a.relationship}")
+        sb.appendLine("（上面两行只是系统记录的感情进度标记，不等于你此刻对 TA 的认知。你们的剧情关系以【角色设定】【当前情境】为准：那里写了你们是什么关系，你就要按什么关系对待 TA，不要因为进度标记写着「陌生人」就真的把 TA 当陌生人。）")
         if (card.statusText.isNotBlank()) {
             sb.appendLine()
             sb.appendLine("【当前状态栏（你的身体/情绪/处境，必须与剧情一致）】")
-            sb.appendLine(card.statusText)
+            sb.appendLine(clean(card.statusText))
         }
         if (card.additionalNotes.isNotBlank()) {
-            val notes = card.additionalNotes.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val notes = card.additionalNotes.lines().map { clean(it).trim() }.filter { it.isNotEmpty() }
             if (notes.isNotEmpty()) {
                 sb.appendLine()
                 sb.appendLine("【已达成的约定（你和玩家共同确认的长期设定，必须始终遵守，不要自相矛盾）】")
@@ -72,7 +83,7 @@ object PromptBuilder {
             }
         }
         if (card.memories.isNotBlank()) {
-            val mems = card.memories.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            val mems = card.memories.lines().map { clean(it).trim() }.filter { it.isNotEmpty() }
             if (mems.isNotEmpty()) {
                 sb.appendLine()
                 sb.appendLine("【你们的共同回忆（已经真实发生过的事，你必须记得并能自然提起细节）】")
@@ -83,7 +94,7 @@ object PromptBuilder {
             sb.appendLine()
             sb.appendLine("【对话风格示例】")
             sb.appendLine("参考以下示例把握语气与说话方式（不要照搬内容）：")
-            sb.appendLine(card.mesExample)
+            sb.appendLine(clean(card.mesExample))
         }
 
         sb.appendLine()

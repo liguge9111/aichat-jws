@@ -44,7 +44,8 @@ object CardMapper {
             additionalNotes = card.additionalNotes,
             memories = card.memories,
             alternateGreetings = encodeGreetings(card.alternateGreetings),
-            visualAnchor = card.visualAnchor
+            visualAnchor = card.visualAnchor,
+            ttsVoice = card.ttsVoice
         )
 
     fun toDomain(entity: CharacterCardEntity): CharacterCard {
@@ -71,7 +72,8 @@ object CardMapper {
             additionalNotes = entity.additionalNotes,
             memories = entity.memories,
             alternateGreetings = decodeGreetings(entity.alternateGreetings),
-            visualAnchor = entity.visualAnchor
+            visualAnchor = entity.visualAnchor,
+            ttsVoice = entity.ttsVoice
         )
     }
 }

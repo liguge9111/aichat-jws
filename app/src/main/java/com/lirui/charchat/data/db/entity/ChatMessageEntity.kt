@@ -18,6 +18,12 @@ data class ChatMessageEntity(
     val role: String,          // USER / CHARACTER / SYSTEM
     val text: String,
     val imagePath: String? = null,
+    /** 语音消息本地音频路径（v9）；为空表示这是条纯文字/图片消息。 */
+    val audioPath: String? = null,
+    /** 语音时长（毫秒），用于气泡展示"3\"\""。 */
+    val durationMs: Long = 0,
+    /** 是否为语音消息（v9）：玩家长按录音发出，或角色语音回复。 */
+    val isVoice: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val isStreaming: Boolean = false
 )

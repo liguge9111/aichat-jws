@@ -1,5 +1,6 @@
 package com.lirui.charchat.domain.repository
 
+import android.media.MediaMetadataRetriever
 import android.util.Base64
 import android.util.Log
 import com.lirui.charchat.data.db.dao.CharacterCardDao
@@ -13,6 +14,7 @@ import com.lirui.charchat.domain.chat.PhotoPromptComposer
 import com.lirui.charchat.domain.chat.PromptBuilder
 import com.lirui.charchat.domain.chat.ReplyLanguage
 import com.lirui.charchat.domain.chat.RoundController
+import com.lirui.charchat.domain.chat.UserIdentity
 import com.lirui.charchat.domain.chat.VisualAnchor
 import com.lirui.charchat.domain.chat.WorldBookTrigger
 import com.lirui.charchat.domain.model.CharacterCard
@@ -38,7 +40,12 @@ class ChatOrchestrator @Inject constructor(
     fun send(
         card: CharacterCard,
         history: List<ChatMsg>,
-        rawUserText: String
+        rawUserText: String,
+        /**
+         * 玩家语音（音频路径 → 时长 ms）；非空表示本轮是语音输入：
+         * 玩家消息带上音频，且角色也回语音（P2：发语音才回语音）。
+         */
+        voiceAudio: Pair<String, Long>? = null
     ): Flow<ChatPhase> = flow {
         val cardId = card.id
         val guarded = InputGuardrail.sanitize(rawUserText, card.name).text
@@ -47,14 +54,21 @@ class ChatOrchestrator @Inject constructor(
             return@flow
         }
 
-        messages.insertUser(cardId, guarded)
+        messages.insertUser(cardId, guarded, voiceAudio?.first, voiceAudio?.second ?: 0L)
         // 世界书：按本轮玩家输入 + 最近若干轮上下文（含角色自己说过的话）做关键字命中
         val worldTexts = listOf(guarded) + history.takeLast(8).map { it.content }
         val activeWorld = WorldBookTrigger.matches(card.worldBookJson, *worldTexts.toTypedArray())
         // 回复语言跟随玩家本轮输入：英文角色卡 + 中文提问时，不应跟着卡说英文
         val replyLanguage = ReplyLanguage.detect(guarded)
         val system = PromptBuilder.build(card, activeWorld, replyLanguage)
-        val req = listOf(ChatMsg("system", system)) + history + ChatMsg("user", guarded)
+        // 历史与本次玩家消息里的 {{user}}/{{char}} 宏统一替换为玩家/角色名（system 已在 build 内替换，不重复）。
+        // 覆盖开场白等角色消息中残留的占位符——多数模型不认识这些宏，原样下发会把"玩家是谁"的线索丢掉。
+        val playerName = UserIdentity.displayName(card.player)
+        val cleanUserText = UserIdentity.replace(guarded, playerName, card.name)
+        val cleanHistory = history.map { m ->
+            m.copy(content = UserIdentity.replace(m.content, playerName, card.name))
+        }
+        val req = listOf(ChatMsg("system", system)) + cleanHistory + ChatMsg("user", cleanUserText)
 
         emit(ChatPhase.Thinking)
         Log.i(TAG, "send start card=$cardId history=${history.size}")
@@ -92,6 +106,15 @@ class ChatOrchestrator @Inject constructor(
             generatePhoto(card, history, lastCharSeq!!, scene)?.let { emit(ChatPhase.Notice(it)) }
         }
 
+        // 语音回复：玩家发语音时，把这一轮角色说的话合成一条语音，挂在最后一条角色消息上
+        if (voiceAudio != null && lastCharSeq != null) {
+            val speakText = parsed.bubbles.joinToString(" ") { it.text }.trim()
+            if (speakText.isNotBlank()) {
+                emit(ChatPhase.GeneratingVoice)
+                generateVoice(card, lastCharSeq!!, speakText)?.let { emit(ChatPhase.Notice(it)) }
+            }
+        }
+
         // 好感/关系/状态栏/约定/回忆演进：解析同一次返回里的隐藏信号，更新卡片行
         val upd = AttributeEngine.parse(raw.toString())
         if (upd != null) {
@@ -106,6 +129,32 @@ class ChatOrchestrator @Inject constructor(
 
         emit(ChatPhase.Done(true))
     }
+
+    /**
+     * 把角色这一轮的话合成语音并挂到指定消息上；失败不中断对话（文字照常显示），
+     * 只返回一条可展示给玩家的说明。
+     */
+    private suspend fun generateVoice(card: CharacterCard, seq: Long, text: String): String? {
+        return try {
+            val bytes = chatRepo.synthesizeSpeech(text, card.ttsVoice)
+            val path = storage.saveAudio(bytes, "mp3")
+            messages.updateAudioPath(seq, path, readAudioDuration(path))
+            null
+        } catch (e: Throwable) {
+            Log.w(TAG, "voice synthesis failed: ${e.message}", e)
+            "语音生成失败：${e.message ?: "未知错误"}（文字回复不受影响）"
+        }
+    }
+
+    /** 读取音频时长（毫秒）；读不到回落 0，UI 只展示时长，失败不影响播放。 */
+    private fun readAudioDuration(path: String): Long = runCatching {
+        val retriever = MediaMetadataRetriever()
+        retriever.setDataSource(path)
+        val ms = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+            ?.toLongOrNull() ?: 0L
+        retriever.release()
+        ms
+    }.getOrDefault(0L)
 
     /**
      * 生成图片并挂到指定消息上；失败不中断对话，返回可直接展示给玩家的错误文案。

@@ -63,7 +63,7 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         GroupMessageEntity::class,
         PlayerProfileEntity::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -86,12 +86,35 @@ abstract class AppDatabase : RoomDatabase() {
                 )
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8
+                        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9
                     )
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { INSTANCE = it }
             }
+    }
+}
+
+/**
+ * v8 → v9：语音消息与每角色音色。
+ * - messages 新增 audioPath / durationMs / isVoice：语音消息（长按录音发送、角色语音回复）。
+ * - cards 新增 ttsVoice：该角色专用的语音合成音色（留空则回落设置里的全局音色）。
+ * 幂等：与 5_6/6_7/7_8 一致先查列存在，避免历史"伪版本库"重复 ALTER 崩库。
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        if (!hasColumn(db, "messages", "audioPath")) {
+            db.execSQL("ALTER TABLE `messages` ADD COLUMN `audioPath` TEXT")
+        }
+        if (!hasColumn(db, "messages", "durationMs")) {
+            db.execSQL("ALTER TABLE `messages` ADD COLUMN `durationMs` INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "messages", "isVoice")) {
+            db.execSQL("ALTER TABLE `messages` ADD COLUMN `isVoice` INTEGER NOT NULL DEFAULT 0")
+        }
+        if (!hasColumn(db, "cards", "ttsVoice")) {
+            db.execSQL("ALTER TABLE `cards` ADD COLUMN `ttsVoice` TEXT NOT NULL DEFAULT ''")
+        }
     }
 }
 

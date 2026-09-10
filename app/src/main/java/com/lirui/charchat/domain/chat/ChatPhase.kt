@@ -11,6 +11,9 @@ sealed interface ChatPhase {
     /** 正在为第 index 张（共 total 张）照片调用图像 API。 */
     data class GeneratingPhoto(val index: Int, val total: Int) : ChatPhase
 
+    /** 正在把角色这一轮的话合成语音（玩家发语音时才触发）。 */
+    object GeneratingVoice : ChatPhase
+
     /** 非致命提示（如图片生成失败）：本轮对话照常完成，只是给玩家一条可见说明。 */
     data class Notice(val message: String, val isError: Boolean = true) : ChatPhase
 

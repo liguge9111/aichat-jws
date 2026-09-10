@@ -77,4 +77,8 @@ interface CharacterCardDao {
     /** 角色视觉档案（v8）：图像一致性锚点，首次出图前提炼一次后固化，可手动覆盖。 */
     @Query("UPDATE cards SET visualAnchor = :anchor WHERE id = :id")
     suspend fun updateVisualAnchor(id: String, anchor: String)
+
+    /** 该角色专用音色（v9）；传空串表示回落设置里的全局音色。 */
+    @Query("UPDATE cards SET ttsVoice = :voice WHERE id = :id")
+    suspend fun updateTtsVoice(id: String, voice: String)
 }

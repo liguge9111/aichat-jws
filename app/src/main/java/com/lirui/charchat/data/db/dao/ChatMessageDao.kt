@@ -22,6 +22,10 @@ interface ChatMessageDao {
     @Query("UPDATE messages SET imagePath = :path WHERE seq = :seq")
     suspend fun updateImagePath(seq: Long, path: String)
 
+    /** 语音回复合成完成后回写音频路径与时长。 */
+    @Query("UPDATE messages SET audioPath = :path, durationMs = :durationMs, isVoice = 1 WHERE seq = :seq")
+    suspend fun updateAudioPath(seq: Long, path: String, durationMs: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(message: ChatMessageEntity): Long
 

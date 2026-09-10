@@ -11,6 +11,19 @@ data class ApiConfig(
     val imageBaseUrl: String = "https://api.openai.com/v1",
     val imageApiKey: String = "",
     val imageModel: String = "gpt-image-1",
+    // ---- 语音：TTS 把角色回复合成为语音条；ASR 把玩家语音转成文字送进对话模型 ----
+    /** 语音合成（TTS）Base URL，留空复用对话侧。 */
+    val ttsBaseUrl: String = "",
+    val ttsApiKey: String = "",
+    /** 合成模型名，例如 qwen-tts / cosyvoice-v1 / speech-02-hd。 */
+    val ttsModel: String = "",
+    /** 音色（口音）ID，例如 Cherry / longxiaochun；留空由服务端决定。 */
+    val ttsVoice: String = "",
+    /** 语音识别（ASR）Base URL，留空复用 TTS 侧配置。 */
+    val asrBaseUrl: String = "",
+    val asrApiKey: String = "",
+    /** 识别模型名，例如 whisper-1 / paraformer-v2 / fun-asr。 */
+    val asrModel: String = "",
     val nsfwFilterEnabled: Boolean = false,
     val ageVerified: Boolean = false
 )

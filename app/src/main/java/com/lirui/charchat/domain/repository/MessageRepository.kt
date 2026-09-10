@@ -15,13 +15,31 @@ class MessageRepository @Inject constructor(
 ) {
     fun observe(cardId: String): Flow<List<ChatMessageEntity>> = dao.observeForCard(cardId)
 
-    suspend fun insertUser(cardId: String, text: String): Long =
-        dao.insert(ChatMessageEntity(cardId = cardId, role = "USER", text = text))
+    /** 玩家消息；传 audioPath 即为语音消息（isVoice 自动置位）。 */
+    suspend fun insertUser(
+        cardId: String,
+        text: String,
+        audioPath: String? = null,
+        durationMs: Long = 0
+    ): Long = dao.insert(
+        ChatMessageEntity(
+            cardId = cardId,
+            role = "USER",
+            text = text,
+            audioPath = audioPath,
+            durationMs = durationMs,
+            isVoice = !audioPath.isNullOrBlank()
+        )
+    )
 
     suspend fun insertCharacter(cardId: String, text: String, imagePath: String? = null): Long =
         dao.insert(ChatMessageEntity(cardId = cardId, role = "CHARACTER", text = text, imagePath = imagePath))
 
     suspend fun updateImagePath(seq: Long, path: String) = dao.updateImagePath(seq, path)
+
+    /** 角色语音回复合成成功后回写音频。 */
+    suspend fun updateAudioPath(seq: Long, path: String, durationMs: Long) =
+        dao.updateAudioPath(seq, path, durationMs)
 
     /** 直接查库计数（避免依赖 UI 状态的时序竞态，用于判断是否需要播种开场白）。 */
     suspend fun count(cardId: String): Int = dao.countForCard(cardId)

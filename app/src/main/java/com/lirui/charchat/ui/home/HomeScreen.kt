@@ -76,6 +76,7 @@ fun HomeScreen(
 
     var pendingDelete by remember { mutableStateOf<CharacterCardEntity?>(null) }
     var pendingClear by remember { mutableStateOf<CharacterCardEntity?>(null) }
+    var pendingRestart by remember { mutableStateOf<CharacterCardEntity?>(null) }
     var pendingRestore by remember { mutableStateOf<String?>(null) }
     var menuExpanded by remember { mutableStateOf(false) }
 
@@ -193,7 +194,8 @@ fun HomeScreen(
                             card = card,
                             onClick = { onOpenChat(card.id) },
                             onDelete = { pendingDelete = card },
-                            onClearChat = { pendingClear = card }
+                            onClearChat = { pendingClear = card },
+                            onRestart = { pendingRestart = card }
                         )
                     }
                 }
@@ -218,6 +220,16 @@ fun HomeScreen(
             confirmText = "清空",
             onDismiss = { pendingClear = null },
             onConfirm = { vm.clearChat(card); pendingClear = null }
+        )
+    }
+
+    pendingRestart?.let { card ->
+        ConfirmDialog(
+            title = "重新开始聊天",
+            text = "将清空「${card.name}」的全部聊天记录，并把好感度、关系阶段、共同回忆与达成的约定全部归零；角色卡设定与状态栏保留。下次进入会重新弹出开场白，就像第一次见面。",
+            confirmText = "重新开始",
+            onDismiss = { pendingRestart = null },
+            onConfirm = { vm.restartChat(card); pendingRestart = null }
         )
     }
 
@@ -265,7 +277,8 @@ private fun CardRow(
     card: CharacterCardEntity,
     onClick: () -> Unit,
     onDelete: () -> Unit,
-    onClearChat: () -> Unit
+    onClearChat: () -> Unit,
+    onRestart: () -> Unit
 ) {
     var menu by remember { mutableStateOf(false) }
     Card(
@@ -304,6 +317,10 @@ private fun CardRow(
                     Icon(Icons.Filled.MoreVert, "更多操作")
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("重新开始聊天") },
+                        onClick = { menu = false; onRestart() }
+                    )
                     DropdownMenuItem(
                         text = { Text("清空聊天记录") },
                         onClick = { menu = false; onClearChat() }

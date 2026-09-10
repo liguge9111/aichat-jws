@@ -45,6 +45,13 @@ class SettingsRepository(context: Context) {
         imageBaseUrl = prefs.getString(KEY_IMG_URL, ApiConfig().imageBaseUrl) ?: ApiConfig().imageBaseUrl,
         imageApiKey = prefs.getString(KEY_IMG_KEY, "") ?: "",
         imageModel = prefs.getString(KEY_IMG_MODEL, ApiConfig().imageModel) ?: ApiConfig().imageModel,
+        ttsBaseUrl = prefs.getString(KEY_TTS_URL, "") ?: "",
+        ttsApiKey = prefs.getString(KEY_TTS_KEY, "") ?: "",
+        ttsModel = prefs.getString(KEY_TTS_MODEL, "") ?: "",
+        ttsVoice = prefs.getString(KEY_TTS_VOICE, "") ?: "",
+        asrBaseUrl = prefs.getString(KEY_ASR_URL, "") ?: "",
+        asrApiKey = prefs.getString(KEY_ASR_KEY, "") ?: "",
+        asrModel = prefs.getString(KEY_ASR_MODEL, "") ?: "",
         nsfwFilterEnabled = prefs.getBoolean(KEY_NSFW, false),
         ageVerified = prefs.getBoolean(KEY_AGE, false)
     )
@@ -57,7 +64,14 @@ class SettingsRepository(context: Context) {
             chatModel = cfg.chatModel.trim(),
             imageBaseUrl = cfg.imageBaseUrl.trim(),
             imageApiKey = ApiKey.normalize(cfg.imageApiKey),
-            imageModel = cfg.imageModel.trim()
+            imageModel = cfg.imageModel.trim(),
+            ttsBaseUrl = cfg.ttsBaseUrl.trim(),
+            ttsApiKey = ApiKey.normalize(cfg.ttsApiKey),
+            ttsModel = cfg.ttsModel.trim(),
+            ttsVoice = cfg.ttsVoice.trim(),
+            asrBaseUrl = cfg.asrBaseUrl.trim(),
+            asrApiKey = ApiKey.normalize(cfg.asrApiKey),
+            asrModel = cfg.asrModel.trim()
         )
         prefs.edit().apply {
             putString(KEY_CHAT_URL, clean.chatBaseUrl)
@@ -66,6 +80,13 @@ class SettingsRepository(context: Context) {
             putString(KEY_IMG_URL, clean.imageBaseUrl)
             putString(KEY_IMG_KEY, clean.imageApiKey)
             putString(KEY_IMG_MODEL, clean.imageModel)
+            putString(KEY_TTS_URL, clean.ttsBaseUrl)
+            putString(KEY_TTS_KEY, clean.ttsApiKey)
+            putString(KEY_TTS_MODEL, clean.ttsModel)
+            putString(KEY_TTS_VOICE, clean.ttsVoice)
+            putString(KEY_ASR_URL, clean.asrBaseUrl)
+            putString(KEY_ASR_KEY, clean.asrApiKey)
+            putString(KEY_ASR_MODEL, clean.asrModel)
             putBoolean(KEY_NSFW, clean.nsfwFilterEnabled)
             putBoolean(KEY_AGE, clean.ageVerified)
         }.apply()
@@ -97,6 +118,13 @@ class SettingsRepository(context: Context) {
         private const val KEY_IMG_URL = "image_base_url"
         private const val KEY_IMG_KEY = "image_api_key"
         private const val KEY_IMG_MODEL = "image_model"
+        private const val KEY_TTS_URL = "tts_base_url"
+        private const val KEY_TTS_KEY = "tts_api_key"
+        private const val KEY_TTS_MODEL = "tts_model"
+        private const val KEY_TTS_VOICE = "tts_voice"
+        private const val KEY_ASR_URL = "asr_base_url"
+        private const val KEY_ASR_KEY = "asr_api_key"
+        private const val KEY_ASR_MODEL = "asr_model"
         private const val KEY_NSFW = "nsfw_filter"
         private const val KEY_AGE = "age_verified"
         private const val KEY_PLAYER = "default_player_json"
