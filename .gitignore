@@ -25,6 +25,10 @@ app/build/
 app/release/
 app/debug/
 
+# 安装包产物（APK / AAB 走 GitHub Releases 分发，不入库）
+*.apk
+*.aab
+
 # 签名与密钥（切勿提交）
 *.jks
 *.keystore
