@@ -168,21 +168,52 @@ fun SettingsScreen(
             Section("语音模型", "语音合成(TTS)与识别(ASR)，留空逐级复用",
                 summary = cfg.ttsModel.ifBlank { "复用对话侧" }) {
                 Text(
-                    "TTS 把角色的回复读成语音；ASR 把玩家发的语音转成文字再进对话模型。留空时 ASR 复用 TTS 配置、TTS 复用对话配置。",
+                    "TTS 把角色的回复读成语音；ASR 把玩家发的语音转成文字再进对话模型。留空时 ASR 复用 TTS 配置、TTS 复用对话配置。\n" +
+                        "填 Base URL 时只需填到 /v1 即可（例如 https://api.xiaomimimo.com/v1），" +
+                        "误粘 /chat/completions 之类的端点后缀会自动去掉。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text("语音合成（TTS）", style = MaterialTheme.typography.labelLarge)
                 Field("TTS Base URL", cfg.ttsBaseUrl) { cfg = cfg.copy(ttsBaseUrl = it) }
                 Field("TTS API Key", cfg.ttsApiKey, isSecret = true) { cfg = cfg.copy(ttsApiKey = it) }
-                Field("TTS Model", cfg.ttsModel) { cfg = cfg.copy(ttsModel = it) }
+                Field("TTS Model（留空按协议默认）", cfg.ttsModel) { cfg = cfg.copy(ttsModel = it) }
                 Field("音色 / 口音（Voice ID）", cfg.ttsVoice) { cfg = cfg.copy(ttsVoice = it) }
+                Text(
+                    "小米 MiMo 音色：mimo_default / 冰糖 / 茉莉 / 苏打 / 白桦 / Mia / Chloe / Milo / Dean",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(Modifier.height(4.dp))
                 Text("语音识别（ASR，可选）", style = MaterialTheme.typography.labelLarge)
                 Field("ASR Base URL", cfg.asrBaseUrl) { cfg = cfg.copy(asrBaseUrl = it) }
                 Field("ASR API Key", cfg.asrApiKey, isSecret = true) { cfg = cfg.copy(asrApiKey = it) }
-                Field("ASR Model", cfg.asrModel) { cfg = cfg.copy(asrModel = it) }
+                Field("ASR Model（留空按协议默认）", cfg.asrModel) { cfg = cfg.copy(asrModel = it) }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("识别语言", style = MaterialTheme.typography.bodyMedium)
+                    listOf("auto", "zh", "en").forEach { lang ->
+                        TextButton(
+                            onClick = { cfg = cfg.copy(asrLanguage = lang) },
+                            enabled = cfg.asrLanguage != lang
+                        ) {
+                            Text(
+                                when (lang) {
+                                    "auto" -> "自动"
+                                    "zh" -> "中文"
+                                    else -> "英文"
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
             }
 
             HorizontalDivider()

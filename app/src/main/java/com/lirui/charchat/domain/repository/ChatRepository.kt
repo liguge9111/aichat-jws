@@ -8,6 +8,7 @@ import com.lirui.charchat.data.remote.DashScopeImageClient
 import com.lirui.charchat.data.remote.OpenAIChatClient
 import com.lirui.charchat.data.remote.OpenAIImageClient
 import com.lirui.charchat.data.remote.OpenAISpeechClient
+import com.lirui.charchat.data.remote.SynthesizedAudio
 import com.lirui.charchat.data.remote.model.ChatMsg
 import com.lirui.charchat.data.remote.model.ChatRequest
 import com.lirui.charchat.data.remote.model.ImageRequest
@@ -107,25 +108,25 @@ class ChatRepository(
         }
 
     /**
-     * 语音合成（TTS）：把角色回复读成语音，返回音频字节。
+     * 语音合成（TTS）：把角色回复读成语音，返回音频字节 + 实际容器格式。
      * 配置回落链：语音配置 → 对话配置；音色：卡片专用 → 设置全局 → 服务端默认。
      * 网络必须切 IO（同 generateImage，主线程调用会被系统直接掐断）。
      */
-    suspend fun synthesizeSpeech(text: String, voiceOverride: String = ""): ByteArray =
+    suspend fun synthesizeSpeech(text: String, voiceOverride: String = ""): SynthesizedAudio =
         withContext(Dispatchers.IO) {
             val cfg = settings.config.value
             val baseUrl = cfg.ttsBaseUrl.ifBlank { cfg.chatBaseUrl }
             val apiKey = ApiKey.normalize(cfg.ttsApiKey.ifBlank { cfg.chatApiKey })
-            val model = cfg.ttsModel.ifBlank { "tts-1" }
-            val voice = voiceOverride.ifBlank { cfg.ttsVoice }
             if (apiKey.isBlank()) throw ApiException("语音 API Key 未配置，请到设置页「语音模型」填写（也可留空以复用对话 Key）")
             if (baseUrl.isBlank()) throw ApiException("语音 Base URL 未配置")
             if (text.isBlank()) throw ApiException("没有可朗读的内容")
-            OpenAISpeechClient(baseUrl, apiKey, http).synthesize(
+            val client = OpenAISpeechClient(baseUrl, apiKey, http)
+            client.synthesize(
                 text = text,
-                model = model,
-                voice = voice,
-                format = "mp3"
+                // 模型名留空时按协议给默认值：MiMo → mimo-v2.5-tts；OpenAI 兼容 → tts-1
+                model = cfg.ttsModel.ifBlank { client.defaultTtsModel },
+                voice = voiceOverride.ifBlank { cfg.ttsVoice },
+                format = client.ttsFormat
             )
         }
 
@@ -140,10 +141,14 @@ class ChatRepository(
             val apiKey = ApiKey.normalize(
                 cfg.asrApiKey.ifBlank { cfg.ttsApiKey.ifBlank { cfg.chatApiKey } }
             )
-            val model = cfg.asrModel.ifBlank { "whisper-1" }
             if (apiKey.isBlank()) throw ApiException("语音识别 API Key 未配置（设置页「语音模型」）")
             if (baseUrl.isBlank()) throw ApiException("语音识别 Base URL 未配置")
-            OpenAISpeechClient(baseUrl, apiKey, http).transcribe(file, model)
+            val client = OpenAISpeechClient(baseUrl, apiKey, http)
+            client.transcribe(
+                file = file,
+                model = cfg.asrModel.ifBlank { client.defaultAsrModel },
+                language = cfg.asrLanguage
+            )
         }
 
     /** 是否为阿里云百炼域名（国内 dashscope.aliyuncs.com / 国际 dashscope-intl.aliyuncs.com）。 */

@@ -8,7 +8,22 @@
 
 暂无。
 
-## 2026-09 — 语音消息与仓库结构整理（当前版本）
+## 2026-09 — MiMo 语音双协议接入与图片气泡整合（当前版本）
+
+### 新增
+- **MiMo（小米）语音原生协议接入**：小米 MiMo 的 ASR / TTS **复用同一个 `POST /v1/chat/completions`**，并非 OpenAI 的 `/audio/*` 端点。语音客户端改为**双协议自动路由**——host 含 `xiaomimimo.com` 时走 MiMo 原生（ASR 用 `input_audio` 传 `data:audio/wav;base64,…`，TTS 从 `choices[0].message.audio.data` 取 base64），其它网关仍走标准 `/audio/transcriptions` + `/audio/speech`。Base URL 自动归一化（剥离误粘的 `/chat/completions`、`/audio/*` 后缀，缺 `/v1` 时自动补齐）。
+- **WAV 录音器**（`WavRecorder`）：`AudioRecord` 采集 16kHz 单声道 PCM 并自补 44 字节 WAV 头（约 32 KB/s）。替换原 MediaRecorder（AAC/m4a），因为 MiMo 语音接口**只接受 wav / mp3**。
+- 设置页新增 **ASR 识别语言**选择，以及 **MiMo 音色预设**（如 Chloe 等）。
+
+### 变更
+- **语音轮改为延迟落库**：新增 `ChatPhase.SpeakingVoice` 覆盖整个语音轮（请求 → 流式文本 → 语音合成 → 入库），角色**文字与音频在同一次写入中落库**，不再先出字后补语音。
+- 语音轮占位气泡改为 **「对方正在讲话」**（三点跳动动画），避免文字先于语音出现造成的出戏感。
+
+### 修复
+- **语音识别 http 400**：根因是 URL 被拼成 `…/chat/completions/audio/transcriptions`（协议叠加）+ 录音格式 m4a 不被接受，二者叠加导致。双协议路由 + WAV 录音后解决。
+- **图片消息气泡整合**：此前图片以裸图插入聊天流，既无气泡容器也无头像，且与上下气泡无间距。现将**文字 + 图片合并为同一条消息气泡**（4 分支渲染：语音 / 文字+图片 / 纯文字 / 纯图片），带相框、头像、加载转圈 / 失败占位，点击可全屏预览；群聊页同步修复。
+
+## 2026-09 — 语音消息与仓库结构整理
 
 ### 新增
 - **语音消息（DB v9）**：聊天页长按「按住 说话」录音（上滑取消），录音经 ASR 转写后作为语音消息发出；**角色回复会自动带一条语音**，点气泡即可播放（时长随气泡显示、转写文字以小字附在下方）。TTS / ASR 走你自己配置的 OpenAI 兼容端点（`/v1/audio/speech`、`/v1/audio/transcriptions`），配置逐级回落 **ASR → TTS → 对话**；支持**每个角色单独设音色**（`cards.ttsVoice`），留空则回落设置页全局音色。

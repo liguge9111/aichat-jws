@@ -32,8 +32,27 @@ class MessageRepository @Inject constructor(
         )
     )
 
-    suspend fun insertCharacter(cardId: String, text: String, imagePath: String? = null): Long =
-        dao.insert(ChatMessageEntity(cardId = cardId, role = "CHARACTER", text = text, imagePath = imagePath))
+    /**
+     * 角色消息；传 audioPath 即为语音回复（isVoice 自动置位）。
+     * 语音轮要求文字与音频同一次写入，避免先显示文字再补语音。
+     */
+    suspend fun insertCharacter(
+        cardId: String,
+        text: String,
+        imagePath: String? = null,
+        audioPath: String? = null,
+        durationMs: Long = 0
+    ): Long = dao.insert(
+        ChatMessageEntity(
+            cardId = cardId,
+            role = "CHARACTER",
+            text = text,
+            imagePath = imagePath,
+            audioPath = audioPath,
+            durationMs = durationMs,
+            isVoice = !audioPath.isNullOrBlank()
+        )
+    )
 
     suspend fun updateImagePath(seq: Long, path: String) = dao.updateImagePath(seq, path)
 

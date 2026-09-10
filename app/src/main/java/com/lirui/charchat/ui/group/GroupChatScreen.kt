@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -231,12 +232,23 @@ private fun GroupBubble(msg: GroupMessageEntity) {
                 }
             }
             msg.imagePath?.let { path ->
-                AsyncImage(
-                    model = if (path.startsWith("http")) path else File(path),
-                    contentDescription = null,
-                    modifier = Modifier.widthIn(max = 240.dp).clip(RoundedCornerShape(12.dp)),
-                    contentScale = ContentScale.Fit
-                )
+                // 图片用与文字气泡同色的 Surface 包成"相框"，避免裸图悬浮在聊天区
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isUser) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    AsyncImage(
+                        model = if (path.startsWith("http")) path else File(path),
+                        contentDescription = "图片",
+                        modifier = Modifier
+                            .padding(4.dp)
+                            .widthIn(max = 200.dp)
+                            .heightIn(max = 260.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+                }
             }
         }
     }

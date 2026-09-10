@@ -45,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Book
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Mic
@@ -83,8 +84,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.lirui.charchat.data.db.entity.ChatMessageEntity
 import com.lirui.charchat.data.db.entity.PlayerProfileEntity
 import com.lirui.charchat.domain.chat.ChatPhase
@@ -123,6 +126,8 @@ fun ChatScreen(
     var confirmClear by remember { mutableStateOf(false) }
     var voiceMode by remember { mutableStateOf(false) }
     var showVoicePick by remember { mutableStateOf(false) }
+    /** 点图片气泡 → 全屏预览；null = 未打开。 */
+    var fullImage by remember { mutableStateOf<String?>(null) }
     val phase = state.phase
     val busy = phase !is ChatPhase.Done
 
@@ -259,7 +264,8 @@ fun ChatScreen(
                         playerName = state.boundProfile?.name ?: "",
                         playingAudioPath = state.playingAudioPath,
                         onLongPressUser = { editing = it.seq to it.text },
-                        onTogglePlay = { vm.togglePlayAudio(it) }
+                        onTogglePlay = { vm.togglePlayAudio(it) },
+                        onImageClick = { fullImage = it }
                     )
                 }
                 when (phase) {
@@ -270,8 +276,8 @@ fun ChatScreen(
                     }
                     is ChatPhase.GeneratingPhoto ->
                         item { PhotoReceivingBubble(state.card?.avatarPath, phase.index, phase.total) }
-                    is ChatPhase.GeneratingVoice ->
-                        item { WeChatTypingBubble(state.card?.avatarPath, hint = "正在合成语音…") }
+                    is ChatPhase.SpeakingVoice ->
+                        item { VoiceSpeakingBubble(state.card?.avatarPath) }
                     is ChatPhase.Done -> if (!phase.success) {
                         item { CenterHint(phase.error ?: "回复失败", isError = true) }
                     }
@@ -383,6 +389,38 @@ fun ChatScreen(
             }
         )
     }
+
+    // 图片全屏预览：点击图片气泡打开，背景半透明黑、点任意位置/右上角关闭。
+    fullImage?.let { imgPath ->
+        Dialog(onDismissRequest = { fullImage = null }) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xCC000000))
+                    .clickable { fullImage = null },
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = if (imgPath.startsWith("http")) imgPath else File(imgPath),
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Fit
+                )
+                IconButton(
+                    onClick = { fullImage = null },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Close,
+                        contentDescription = "关闭",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -394,7 +432,8 @@ private fun WeChatBubble(
     playerName: String,
     playingAudioPath: String?,
     onLongPressUser: (ChatMessageEntity) -> Unit,
-    onTogglePlay: (String) -> Unit
+    onTogglePlay: (String) -> Unit,
+    onImageClick: (String) -> Unit = {}
 ) {
     val isUser = msg.role == "USER"
     Row(
@@ -407,100 +446,148 @@ private fun WeChatBubble(
             Spacer(Modifier.width(6.dp))
         }
         Column(horizontalAlignment = if (isUser) Alignment.End else Alignment.Start) {
-            if (msg.audioPath != null) {
-                // 语音消息：气泡显示播放态 + 时长；文字转写在气泡下方小字（ASR 内容透明可见）
-                val playing = playingAudioPath == msg.audioPath
-                val shape = if (isUser) {
-                    RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
-                } else {
-                    RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
-                }
-                Row(
-                    Modifier
-                        .clip(shape)
-                        .background(if (isUser) WeChatGreen else Color.White)
-                        .clickable { onTogglePlay(msg.audioPath) }
-                        .widthIn(min = 78.dp, max = 220.dp)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    val iconColor = when {
-                        playing -> Color(0xFF07C160)
-                        isUser -> Color(0xFF2E7D32)
-                        else -> Color(0xFF666666)
-                    }
-                    Icon(
-                        Icons.AutoMirrored.Filled.VolumeUp,
-                        if (playing) "停止播放" else "播放语音",
-                        tint = iconColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        if (playing) {
-                            "播放中…"
-                        } else {
-                            if (msg.durationMs > 0) "${((msg.durationMs + 500) / 1000).coerceAtLeast(1)}″"
-                            else "语音"
-                        },
-                        fontSize = 14.sp,
-                        color = Color(0xFF111111)
-                    )
-                }
-                if (msg.text.isNotBlank()) {
-                    val transcript = remember(msg.text) { RoundController.sanitizeVisible(msg.text) }
-                    Text(
-                        transcript,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        color = if (isUser) Color(0xFF4E6B3E) else Color(0xFF9E9E9E),
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 3.dp, start = 4.dp).widthIn(max = 220.dp)
-                    )
-                }
-            } else if (msg.text.isNotBlank()) {
-                val shape = if (isUser) {
-                    RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
-                } else {
-                    RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
-                }
-                Box(
-                    Modifier
-                        .clip(shape)
-                        .background(if (isUser) WeChatGreen else Color.White)
-                        .combinedClickable(
-                            enabled = isUser,
-                            onClick = {},
-                            onLongClick = { onLongPressUser(msg) }
-                        )
-                        .widthIn(max = 258.dp)
-                        .padding(horizontal = 12.dp, vertical = 9.dp)
-                ) {
-                    // 渲染层兜底：历史消息（firstMes 入库前未清洗、模型早期轮残留等）也走一次清洗，
-                    // 防止玩家看到残留的 **、#、---、未知【…】标签。
-                    val cleaned = remember(msg.text) { RoundController.sanitizeVisible(msg.text) }
-                    Text(
-                        cleaned,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        color = Color(0xFF111111),
-                        softWrap = true
-                    )
-                }
+            val shape = if (isUser) {
+                RoundedCornerShape(topStart = 14.dp, topEnd = 4.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
+            } else {
+                RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 14.dp)
             }
-            msg.imagePath?.let { path ->
-                val model: Any = if (path.startsWith("http")) path else File(path)
-                AsyncImage(
-                    model = model,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .widthIn(max = 240.dp)
-                        .heightIn(max = 320.dp)
-                        .clip(RoundedCornerShape(8.dp)),
-                    contentScale = ContentScale.Fit
-                )
+            val hasAudio = msg.audioPath != null
+            val hasText = msg.text.isNotBlank()
+            val hasImage = msg.imagePath != null
+
+            when {
+                // 1) 语音消息：播放器气泡 + 转写小字；若同时带图，图另起一个气泡（与播放器同框很怪）
+                hasAudio -> {
+                    val audioPath = msg.audioPath!!
+                    val playing = playingAudioPath == audioPath
+                    Row(
+                        Modifier
+                            .clip(shape)
+                            .background(if (isUser) WeChatGreen else Color.White)
+                            .clickable { onTogglePlay(audioPath) }
+                            .widthIn(min = 78.dp, max = 220.dp)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        val iconColor = when {
+                            playing -> Color(0xFF07C160)
+                            isUser -> Color(0xFF2E7D32)
+                            else -> Color(0xFF666666)
+                        }
+                        Icon(
+                            Icons.AutoMirrored.Filled.VolumeUp,
+                            if (playing) "停止播放" else "播放语音",
+                            tint = iconColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            if (playing) {
+                                "播放中…"
+                            } else {
+                                if (msg.durationMs > 0) "${((msg.durationMs + 500) / 1000).coerceAtLeast(1)}″"
+                                else "语音"
+                            },
+                            fontSize = 14.sp,
+                            color = Color(0xFF111111)
+                        )
+                    }
+                    if (hasText) {
+                        val transcript = remember(msg.text) { RoundController.sanitizeVisible(msg.text) }
+                        Text(
+                            transcript,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            color = if (isUser) Color(0xFF4E6B3E) else Color(0xFF9E9E9E),
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 3.dp, start = 4.dp).widthIn(max = 220.dp)
+                        )
+                    }
+                    if (hasImage) {
+                        Spacer(Modifier.height(6.dp))
+                        PhotoBubble(
+                            path = msg.imagePath!!,
+                            shape = shape,
+                            isUser = isUser,
+                            onImageClick = onImageClick
+                        )
+                    }
+                }
+
+                // 2) 文字 + 照片 → 合成同一条气泡：头像贴在整条消息左侧，
+                //    文字与图片同框（内部留 7dp 间隔），长按整条可编辑、点照片看大图。
+                hasText && hasImage -> {
+                    Box(
+                        Modifier
+                            .clip(shape)
+                            .background(if (isUser) WeChatGreen else Color.White)
+                            .combinedClickable(
+                                enabled = isUser,
+                                onClick = {},
+                                onLongClick = { onLongPressUser(msg) }
+                            )
+                            .widthIn(max = 258.dp)
+                            .padding(horizontal = 10.dp, vertical = 9.dp)
+                    ) {
+                        Column {
+                            // 渲染层兜底：历史消息（firstMes 入库前未清洗、模型早期轮残留等）也走一次清洗，
+                            // 防止玩家看到残留的 **、#、---、未知【…】标签。
+                            val cleaned = remember(msg.text) { RoundController.sanitizeVisible(msg.text) }
+                            Text(
+                                cleaned,
+                                fontSize = 16.sp,
+                                lineHeight = 22.sp,
+                                color = Color(0xFF111111),
+                                softWrap = true
+                            )
+                            Spacer(Modifier.height(7.dp))
+                            PhotoBubble(
+                                path = msg.imagePath!!,
+                                shape = RoundedCornerShape(6.dp),
+                                isUser = isUser,
+                                onImageClick = onImageClick,
+                                padding = 0.dp
+                            )
+                        }
+                    }
+                }
+
+                // 3) 纯文字
+                hasText -> {
+                    Box(
+                        Modifier
+                            .clip(shape)
+                            .background(if (isUser) WeChatGreen else Color.White)
+                            .combinedClickable(
+                                enabled = isUser,
+                                onClick = {},
+                                onLongClick = { onLongPressUser(msg) }
+                            )
+                            .widthIn(max = 258.dp)
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        val cleaned = remember(msg.text) { RoundController.sanitizeVisible(msg.text) }
+                        Text(
+                            cleaned,
+                            fontSize = 16.sp,
+                            lineHeight = 22.sp,
+                            color = Color(0xFF111111),
+                            softWrap = true
+                        )
+                    }
+                }
+
+                // 4) 纯图片
+                hasImage -> {
+                    PhotoBubble(
+                        path = msg.imagePath!!,
+                        shape = shape,
+                        isUser = isUser,
+                        onImageClick = onImageClick
+                    )
+                }
             }
         }
         if (isUser) {
@@ -511,6 +598,53 @@ private fun WeChatBubble(
                 size = 40.dp
             )
         }
+    }
+}
+
+/**
+ * 图片气泡：与文字/语音气泡同款圆角 + 白底/绿底容器，内边距当相框；
+ * 加载中显示小转圈、失败显示占位；点击进全屏预览。
+ * padding=0 用于"已嵌在合并气泡里"的场景（外层气泡已有内边距）。
+ */
+@Composable
+private fun PhotoBubble(
+    path: String,
+    shape: RoundedCornerShape,
+    isUser: Boolean,
+    onImageClick: (String) -> Unit,
+    padding: Dp = 4.dp
+) {
+    val model: Any = if (path.startsWith("http")) path else File(path)
+    Box(
+        Modifier
+            .clip(shape)
+            .background(if (isUser) WeChatGreen else Color.White)
+            .clickable { onImageClick(path) }
+            .padding(padding)
+    ) {
+        SubcomposeAsyncImage(
+            model = model,
+            contentDescription = "图片",
+            loading = {
+                Box(Modifier.size(180.dp, 180.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.5.dp,
+                        color = Color(0xFF9E9E9E)
+                    )
+                }
+            },
+            error = {
+                Box(Modifier.size(180.dp, 120.dp), contentAlignment = Alignment.Center) {
+                    Text("图片加载失败", fontSize = 12.sp, color = Color(0xFF888888))
+                }
+            },
+            modifier = Modifier
+                .widthIn(max = 200.dp)
+                .heightIn(max = 260.dp)
+                .clip(RoundedCornerShape(6.dp)),
+            contentScale = ContentScale.Fit
+        )
     }
 }
 
@@ -547,6 +681,59 @@ private fun WeChatTypingBubble(avatarPath: String?, hint: String = "对方正在
                 .padding(horizontal = 12.dp, vertical = 9.dp)
         ) {
             Text(hint, fontSize = 14.sp, color = Color(0xFF888888))
+        }
+    }
+}
+
+/**
+ * 语音轮占位气泡：玩家发的是语音时，角色这一轮会以语音回复。
+ * 在文字与语音都合成好之前只显示"对方正在讲话…"（麦克风 + 跳动三点），
+ * 两者就绪后一起出现 —— 避免"先看到文字、再补上语音"的割裂感。
+ */
+@Composable
+private fun VoiceSpeakingBubble(avatarPath: String?) {
+    val transition = rememberInfiniteTransition(label = "voiceSpeaking")
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Start,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CharacterAvatar(avatarPath, 40.dp)
+        Spacer(Modifier.width(6.dp))
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 14.dp, bottomEnd = 14.dp, bottomStart = 14.dp))
+                .background(Color.White)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                Icons.Filled.Mic,
+                contentDescription = null,
+                tint = WeChatGreen,
+                modifier = Modifier.size(17.dp)
+            )
+            Spacer(Modifier.width(7.dp))
+            Text("对方正在讲话", fontSize = 14.sp, color = Color(0xFF888888))
+            Spacer(Modifier.width(3.dp))
+            repeat(3) { i ->
+                val alpha by transition.animateFloat(
+                    initialValue = 0.25f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(durationMillis = 600, delayMillis = i * 160),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "dot$i"
+                )
+                Box(
+                    Modifier
+                        .padding(horizontal = 1.5.dp)
+                        .size(4.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF9E9E9E).copy(alpha = alpha))
+                )
+            }
         }
     }
 }
@@ -788,14 +975,19 @@ private fun VoicePickDialog(
     onConfirm: (String) -> Unit
 ) {
     var value by remember(current) { mutableStateOf(current) }
-    val presets = listOf("alloy", "echo", "fable", "onyx", "nova", "shimmer", "Cherry", "Serena")
+    // 前 9 个是小米 MiMo 内置音色，后面几个是 OpenAI 兼容网关的常用音色
+    val presets = listOf(
+        "mimo_default", "冰糖", "茉莉", "苏打", "白桦", "Mia", "Chloe", "Milo", "Dean",
+        "alloy", "nova", "Cherry", "Serena"
+    )
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("角色语音音色") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "这是 TA 回复语音所用的音色 ID，只对该角色生效。留空则用设置页「语音模型」里的全局音色。",
+                    "这是 TA 回复语音所用的音色 ID，只对该角色生效。留空则用设置页「语音模型」里的全局音色。\n" +
+                        "小米 MiMo 内置音色：mimo_default / 冰糖 / 茉莉 / 苏打 / 白桦 / Mia / Chloe / Milo / Dean",
                     fontSize = 13.sp,
                     color = Color(0xFF777777)
                 )

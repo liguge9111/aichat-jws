@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaPlayer
-import android.media.MediaRecorder
 import android.os.Build
 import android.os.SystemClock
 import androidx.core.content.ContextCompat
@@ -13,6 +12,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lirui.charchat.data.cardparser.CardMapper
 import com.lirui.charchat.data.storage.FileStorage
+import com.lirui.charchat.data.voice.WavRecorder
 import com.lirui.charchat.domain.repository.ChatRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -261,7 +261,7 @@ class ChatViewModel @Inject constructor(
 
     // ---------- 语音：录音 → 转写 → 带语音发送 ----------
 
-    private var recorder: MediaRecorder? = null
+    private var recorder: WavRecorder? = null
     private var recordFile: File? = null
     private var recordStartedAt = 0L
     private var player: MediaPlayer? = null
@@ -271,24 +271,14 @@ class ChatViewModel @Inject constructor(
         ContextCompat.checkSelfPermission(appContext, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED
 
-    /** 按下开始录音（调用前须确认已授权）。输出 AAC/m4a 到应用私有 audio 目录。 */
+    /** 按下开始录音（调用前须确认已授权）。输出 16k 单声道 WAV 到应用私有 audio 目录。 */
     fun startRecording() {
         if (_state.value.isRecording || _state.value.voiceBusy) return
-        val file = File(storage.audioDir(), "rec_${System.currentTimeMillis()}.m4a")
-        val rec = try {
-            MediaRecorder().apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioSamplingRate(44100)
-                setAudioEncodingBitRate(96000)
-                setOutputFile(file.absolutePath)
-                prepare()
-                start()
-            }
-        } catch (e: Throwable) {
+        val file = File(storage.audioDir(), "rec_${System.currentTimeMillis()}.wav")
+        val rec = WavRecorder(file)
+        if (!rec.start()) {
             file.delete()
-            _state.value = _state.value.copy(notice = "无法启动录音：${e.message ?: "未知错误"}")
+            _state.value = _state.value.copy(notice = "无法启动录音：麦克风被占用或不可用")
             return
         }
         recorder = rec
@@ -305,20 +295,14 @@ class ChatViewModel @Inject constructor(
         recorder = null
         recordFile = null
         recordStartedAt = 0L
-        var discarded = cancel
-        try {
-            if (!cancel) rec.stop() // 录音过短时 stop 可能抛异常 → 走丢弃
-        } catch (e: Throwable) {
-            discarded = true
-        } finally {
-            runCatching { rec.release() }
-        }
-        val duration = SystemClock.elapsedRealtime() - started
         _state.value = _state.value.copy(isRecording = false)
-        if (discarded || file == null) {
-            file?.delete()
+        if (cancel) {
+            rec.cancel()
             return
         }
+        // 以实际写入的 PCM 长度为准，比墙上时钟更准（避免启动抖动）
+        val duration = rec.stop().takeIf { it > 0 } ?: (SystemClock.elapsedRealtime() - started)
+        if (file == null) return
         if (duration < 900) {
             file.delete()
             _state.value = _state.value.copy(notice = "说话时间太短，未发送")
@@ -404,14 +388,11 @@ class ChatViewModel @Inject constructor(
     override fun onCleared() {
         stopPlayback()
         val rec = recorder
-        val file = recordFile
         if (rec != null) {
             recorder = null
             recordFile = null
-            runCatching { rec.stop() }
-            runCatching { rec.release() }
+            rec.cancel()
         }
-        file?.delete()
         super.onCleared()
     }
 

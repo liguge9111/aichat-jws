@@ -52,6 +52,7 @@ class SettingsRepository(context: Context) {
         asrBaseUrl = prefs.getString(KEY_ASR_URL, "") ?: "",
         asrApiKey = prefs.getString(KEY_ASR_KEY, "") ?: "",
         asrModel = prefs.getString(KEY_ASR_MODEL, "") ?: "",
+        asrLanguage = prefs.getString(KEY_ASR_LANG, ApiConfig().asrLanguage) ?: ApiConfig().asrLanguage,
         nsfwFilterEnabled = prefs.getBoolean(KEY_NSFW, false),
         ageVerified = prefs.getBoolean(KEY_AGE, false)
     )
@@ -71,7 +72,8 @@ class SettingsRepository(context: Context) {
             ttsVoice = cfg.ttsVoice.trim(),
             asrBaseUrl = cfg.asrBaseUrl.trim(),
             asrApiKey = ApiKey.normalize(cfg.asrApiKey),
-            asrModel = cfg.asrModel.trim()
+            asrModel = cfg.asrModel.trim(),
+            asrLanguage = cfg.asrLanguage.trim().ifBlank { "auto" }
         )
         prefs.edit().apply {
             putString(KEY_CHAT_URL, clean.chatBaseUrl)
@@ -87,6 +89,7 @@ class SettingsRepository(context: Context) {
             putString(KEY_ASR_URL, clean.asrBaseUrl)
             putString(KEY_ASR_KEY, clean.asrApiKey)
             putString(KEY_ASR_MODEL, clean.asrModel)
+            putString(KEY_ASR_LANG, clean.asrLanguage)
             putBoolean(KEY_NSFW, clean.nsfwFilterEnabled)
             putBoolean(KEY_AGE, clean.ageVerified)
         }.apply()
@@ -125,6 +128,7 @@ class SettingsRepository(context: Context) {
         private const val KEY_ASR_URL = "asr_base_url"
         private const val KEY_ASR_KEY = "asr_api_key"
         private const val KEY_ASR_MODEL = "asr_model"
+        private const val KEY_ASR_LANG = "asr_language"
         private const val KEY_NSFW = "nsfw_filter"
         private const val KEY_AGE = "age_verified"
         private const val KEY_PLAYER = "default_player_json"

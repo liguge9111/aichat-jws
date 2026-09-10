@@ -70,14 +70,20 @@ class ChatOrchestrator @Inject constructor(
         }
         val req = listOf(ChatMsg("system", system)) + cleanHistory + ChatMsg("user", cleanUserText)
 
-        emit(ChatPhase.Thinking)
-        Log.i(TAG, "send start card=$cardId history=${history.size}")
+        // 语音轮：玩家发语音 → 角色以语音回复。整轮不逐字展示，统一显示"对方正在讲话…"，
+        // 等文字与语音都就绪后一起落库，避免"先看到文字、再补上语音"的割裂感。
+        val isVoiceTurn = voiceAudio != null
+
+        emit(if (isVoiceTurn) ChatPhase.SpeakingVoice else ChatPhase.Thinking)
+        Log.i(TAG, "send start card=$cardId history=${history.size} voice=$isVoiceTurn")
 
         val raw = StringBuilder()
         try {
             chatRepo.stream(req).collect { chunk ->
                 raw.append(chunk)
-                emit(ChatPhase.Streaming(RoundController.sanitizePreview(raw.toString())))
+                if (!isVoiceTurn) {
+                    emit(ChatPhase.Streaming(RoundController.sanitizePreview(raw.toString())))
+                }
             }
         } catch (e: Throwable) {
             Log.w(TAG, "stream failed: ${e.message}", e)
@@ -87,12 +93,34 @@ class ChatOrchestrator @Inject constructor(
         Log.i(TAG, "stream done, raw=${raw.length} chars")
 
         val parsed = RoundController.parseRound(raw.toString())
+
+        // 语音轮：先把这一轮要说的话合成好（此时 UI 仍停留在"对方正在讲话…"），
+        // 拿到音频后再连同文字一次性写入，两条消息一起出现。
+        var voicePath: String? = null
+        var voiceMs = 0L
+        if (isVoiceTurn) {
+            val speakText = parsed.bubbles.joinToString(" ") { it.text }.trim()
+            if (speakText.isNotBlank()) {
+                val outcome = generateVoice(card, speakText)
+                voicePath = outcome.path
+                voiceMs = outcome.durationMs
+                outcome.error?.let { emit(ChatPhase.Notice(it)) }
+            }
+        }
+
         var lastCharSeq: Long? = null
         parsed.bubbles.forEachIndexed { idx, bubble ->
             if (bubble.photoPrompt != null) {
                 emit(ChatPhase.GeneratingPhoto(idx + 1, parsed.photoCount))
             }
-            val seq = messages.insertCharacter(cardId, bubble.text)
+            // 音频只挂最后一条气泡（本轮全部文字已合成成一条语音）
+            val isLast = idx == parsed.bubbles.lastIndex
+            val seq = messages.insertCharacter(
+                cardId = cardId,
+                text = bubble.text,
+                audioPath = if (isLast) voicePath else null,
+                durationMs = if (isLast) voiceMs else 0L
+            )
             lastCharSeq = seq
             if (bubble.photoPrompt != null) {
                 generatePhoto(card, history, seq, bubble.photoPrompt)?.let { emit(ChatPhase.Notice(it)) }
@@ -104,15 +132,6 @@ class ChatOrchestrator @Inject constructor(
             val scene = PhotoIntent.fallbackPrompt(card.name, card.description, guarded)
             emit(ChatPhase.GeneratingPhoto(1, 1))
             generatePhoto(card, history, lastCharSeq!!, scene)?.let { emit(ChatPhase.Notice(it)) }
-        }
-
-        // 语音回复：玩家发语音时，把这一轮角色说的话合成一条语音，挂在最后一条角色消息上
-        if (voiceAudio != null && lastCharSeq != null) {
-            val speakText = parsed.bubbles.joinToString(" ") { it.text }.trim()
-            if (speakText.isNotBlank()) {
-                emit(ChatPhase.GeneratingVoice)
-                generateVoice(card, lastCharSeq!!, speakText)?.let { emit(ChatPhase.Notice(it)) }
-            }
         }
 
         // 好感/关系/状态栏/约定/回忆演进：解析同一次返回里的隐藏信号，更新卡片行
@@ -130,19 +149,21 @@ class ChatOrchestrator @Inject constructor(
         emit(ChatPhase.Done(true))
     }
 
+    /** 语音合成结果：成功给 path/durationMs，失败给 error 文案（文字回复照常）。 */
+    private class VoiceOutcome(val path: String?, val durationMs: Long, val error: String?)
+
     /**
-     * 把角色这一轮的话合成语音并挂到指定消息上；失败不中断对话（文字照常显示），
-     * 只返回一条可展示给玩家的说明。
+     * 把角色这一轮的话合成语音并落盘，但**不写库**——由调用方在插入角色消息时一并带上，
+     * 以保证文字与语音同时出现。失败不中断对话，只返回一条可展示的说明。
      */
-    private suspend fun generateVoice(card: CharacterCard, seq: Long, text: String): String? {
+    private suspend fun generateVoice(card: CharacterCard, text: String): VoiceOutcome {
         return try {
-            val bytes = chatRepo.synthesizeSpeech(text, card.ttsVoice)
-            val path = storage.saveAudio(bytes, "mp3")
-            messages.updateAudioPath(seq, path, readAudioDuration(path))
-            null
+            val audio = chatRepo.synthesizeSpeech(text, card.ttsVoice)
+            val path = storage.saveAudio(audio.bytes, audio.extension)
+            VoiceOutcome(path, readAudioDuration(path), null)
         } catch (e: Throwable) {
             Log.w(TAG, "voice synthesis failed: ${e.message}", e)
-            "语音生成失败：${e.message ?: "未知错误"}（文字回复不受影响）"
+            VoiceOutcome(null, 0L, "语音生成失败：${e.message ?: "未知错误"}（文字回复不受影响）")
         }
     }
 

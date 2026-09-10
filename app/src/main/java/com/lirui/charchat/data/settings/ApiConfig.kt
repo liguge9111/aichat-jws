@@ -22,8 +22,10 @@ data class ApiConfig(
     /** 语音识别（ASR）Base URL，留空复用 TTS 侧配置。 */
     val asrBaseUrl: String = "",
     val asrApiKey: String = "",
-    /** 识别模型名，例如 whisper-1 / paraformer-v2 / fun-asr。 */
+    /** 识别模型名，例如 mimo-v2.5-asr / whisper-1 / paraformer-v2。 */
     val asrModel: String = "",
+    /** 识别语言：auto（自动）/ zh（中文）/ en（英文）。固定语言可明显提升识别准确率。 */
+    val asrLanguage: String = "zh",
     val nsfwFilterEnabled: Boolean = false,
     val ageVerified: Boolean = false
 )
